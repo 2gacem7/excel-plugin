@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Process Excel File</title>
+</head>
+<body>
+    <h1>Regroupement des marques</h1>
+    <input type="file" id="fileInput" />
+    <br>
+    <label><input type="radio" name="fileOption" value="csv" checked> Séparer les fichiers CSV</label>
+    <label><input type="radio" name="fileOption" value="excel">Fichier Excel unique</label>
+    <br>
+    <button onclick="uploadFile()">Upload and Process</button>
+    <script>
+        function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            const fileOption = document.querySelector('input[name="fileOption"]:checked').value;
+            
+            if (fileInput.files.length === 0) {
+                alert('Please upload a file.');
+                return;
+            }
+
+            const file = fileInput.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('option', fileOption);
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.blob())
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileOption === 'csv' ? 'files.zip' : 'file.xlsx'; // Default names
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+            });
+        }
+    </script>
+</body>
+</html>
