@@ -14,7 +14,7 @@ app.use(express.static('public'));
 
 // Helper function to clean and normalize brand names
 function normalizeBrandName(name) {
-    return name.trim().toLowerCase(); // Normalize brand names by trimming and lowercasing
+    return name ? name.trim().toLowerCase() : ''; // Handle possible undefined or null values
 }
 
 // Helper function to get current date and time as a string
@@ -29,6 +29,11 @@ function getCurrentDateTimeString() {
     return `${year}-${month}-${day}_${hour}-${minute}-${second}`;
 }
 
+// Helper function to limit sheet name length to 31 characters
+function limitSheetNameLength(name) {
+    return name.substring(0, 31); // Limit the length to 31 characters
+}
+
 // Handle file upload and processing
 app.post('/upload', upload.single('file'), (req, res) => {
     if (!req.file) {
@@ -41,19 +46,20 @@ app.post('/upload', upload.single('file'), (req, res) => {
     const sheet = workbook.Sheets[sheetName];
     const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-    // All rows including the first row
+    // All rows including the first row (headers)
     const rows = jsonData;
 
     // Organize data by brand with normalization
     const brands = {};
 
-    rows.forEach(row => {
-        const rawBrand = row[0];
+    rows.forEach((row, index) => {
+        if (index === 0) return; // Skip the header row
+        const rawBrand = row[1]; // Assuming the brand is in the second column
         const normalizedBrand = normalizeBrandName(rawBrand);
 
         if (normalizedBrand) {
             if (!brands[normalizedBrand]) {
-                brands[normalizedBrand] = [];
+                brands[normalizedBrand] = [rows[0]]; // Include headers initially
             }
             brands[normalizedBrand].push(row); // Add row to the brand's data
         }
@@ -65,7 +71,7 @@ app.post('/upload', upload.single('file'), (req, res) => {
 
     brandNames.forEach(brand => {
         const rows = brands[brand];
-        const consistent = rows.every(row => normalizeBrandName(row[0]) === brand);
+        const consistent = rows.slice(1).every(row => normalizeBrandName(row[1]) === brand); // Check consistency for all rows except header
         if (consistent) {
             uniqueBrands[brand] = rows;
         }
@@ -77,8 +83,8 @@ app.post('/upload', upload.single('file'), (req, res) => {
     if (fileOption === 'csv') {
         // Create CSV streams for each brand
         const fileStreams = Object.entries(uniqueBrands).map(([brand, rows]) => {
-            // Exclude the header from the CSV content
-            const csvContent = rows.map(row => row.join(",")).join("\n");
+            // Create CSV content with all rows including headers
+            const csvContent = rows.map(row => row.map(value => `"${value}"`).join(",")).join("\n");
             const stream = new Readable();
             stream.push(csvContent);
             stream.push(null); // End of stream
@@ -109,9 +115,11 @@ app.post('/upload', upload.single('file'), (req, res) => {
         const newWorkbook = XLSX.utils.book_new();
 
         Object.entries(uniqueBrands).forEach(([brand, rows]) => {
+            // Limit the sheet name to 31 characters
+            const limitedBrandName = limitSheetNameLength(brand);
             // Create a worksheet with rows only for each brand
             const ws = XLSX.utils.aoa_to_sheet(rows);
-            XLSX.utils.book_append_sheet(newWorkbook, ws, brand);
+            XLSX.utils.book_append_sheet(newWorkbook, ws, limitedBrandName);
         });
 
         // Generate Excel file name with date and time
