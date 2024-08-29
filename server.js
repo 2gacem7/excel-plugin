@@ -1,7 +1,6 @@
 const express = require('express');
 const multer = require('multer');
 const XLSX = require('xlsx');
-const { Readable } = require('stream');
 const archiver = require('archiver');
 const app = express();
 const port = 3000;
@@ -77,63 +76,32 @@ app.post('/upload', upload.single('file'), (req, res) => {
         }
     });
 
-    const fileOption = req.body.option;
     const dateTimeString = getCurrentDateTimeString();
 
-    if (fileOption === 'csv') {
-        // Create CSV streams for each brand
-        const fileStreams = Object.entries(uniqueBrands).map(([brand, rows]) => {
-            // Create CSV content with all rows including headers
-            const csvContent = rows.map(row => row.map(value => `"${value}"`).join(",")).join("\n");
-            const stream = new Readable();
-            stream.push(csvContent);
-            stream.push(null); // End of stream
-            return {
-                filename: `${brand}_${dateTimeString}.csv`,
-                stream: stream
-            };
-        });
+    // Create ZIP archive
+    const zip = archiver('zip', { zlib: { level: 9 } });
+    res.setHeader('Content-disposition', `attachment; filename=files_${dateTimeString}.zip`);
+    res.setHeader('Content-type', 'application/zip');
 
-        // Generate ZIP file name with date and time
-        const zipFileName = `files_${dateTimeString}.zip`;
+    zip.pipe(res);
 
-        // Send the files as a zip
-        const archive = archiver('zip', { zlib: { level: 9 } });
-
-        res.setHeader('Content-disposition', `attachment; filename=${zipFileName}`);
-        res.setHeader('Content-type', 'application/zip');
-
-        archive.pipe(res);
-
-        fileStreams.forEach(file => {
-            archive.append(file.stream, { name: file.filename });
-        });
-
-        archive.finalize();
-    } else if (fileOption === 'excel') {
-        // Create a new workbook with sheets for each brand
+    // Generate separate XLSX files for each brand and add them to the zip
+    Object.entries(uniqueBrands).forEach(([brand, rows]) => {
+        // Create a new workbook for each brand
         const newWorkbook = XLSX.utils.book_new();
+        const limitedBrandName = limitSheetNameLength(brand);
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        XLSX.utils.book_append_sheet(newWorkbook, ws, limitedBrandName);
 
-        Object.entries(uniqueBrands).forEach(([brand, rows]) => {
-            // Limit the sheet name to 31 characters
-            const limitedBrandName = limitSheetNameLength(brand);
-            // Create a worksheet with rows only for each brand
-            const ws = XLSX.utils.aoa_to_sheet(rows);
-            XLSX.utils.book_append_sheet(newWorkbook, ws, limitedBrandName);
-        });
-
-        // Generate Excel file name with date and time
-        const excelFileName = `file_${dateTimeString}.xlsx`;
-
+        // Generate Excel file as a buffer
         const excelBuffer = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'buffer' });
+        const fileName = `${limitedBrandName}_${dateTimeString}.xlsx`;
 
-        res.setHeader('Content-disposition', `attachment; filename=${excelFileName}`);
-        res.setHeader('Content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        // Append the file buffer to the archive
+        zip.append(excelBuffer, { name: fileName });
+    });
 
-        res.end(excelBuffer);
-    } else {
-        res.status(400).send('Invalid option selected.');
-    }
+    zip.finalize();
 });
 
 // Start server
